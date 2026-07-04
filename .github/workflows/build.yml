@@ -5,8 +5,8 @@ env:
   kernel_repository: MiCode/Xiaomi_Kernel_OpenSource
   kernel_branch: dipper-p-oss
   device: dipper
-  # AOSP Clang r365631c (Clang 9) 最兼容 4.9 内核
-  clang_version: r365631c
+  # AOSP Clang r365631c = Clang 9. For 4.9 kernel, use vanilla Clang 11 from LLVM apt
+  clang_version: 11
   defconfig: |
     dipper_user_defconfig
   kernel_patch: |
@@ -113,7 +113,16 @@ jobs:
             }
           done <<<"$kernel_patch"
 
-      - name: Download AOSP Clang
+      - name: Setup Clang (Vanilla LLVM)
+        if: env.clang_type == 'vanilla'
+        run: |
+          # Install Clang from LLVM apt repository
+          wget -O - https://apt.llvm.org/llvm.sh 2>/dev/null | sudo bash -s -- $clang_version
+          echo PATH=/usr/lib/llvm-$clang_version/bin:$PATH | tee -a $GITHUB_ENV
+          /usr/lib/llvm-$clang_version/bin/clang --version
+
+      - name: Setup Clang (AOSP)
+        if: env.clang_type == 'aosp'
         uses: actions/cache@v4
         id: clang-cache
         with:
@@ -121,7 +130,7 @@ jobs:
           key: aosp-clang-${{ env.clang_version }}-v2
 
       - name: Download AOSP Clang (if not cached)
-        if: steps.clang-cache.outputs.cache-hit != 'true'
+        if: env.clang_type == 'aosp' && steps.clang-cache.outputs.cache-hit != 'true'
         run: |
           aosp_clang_branch=$(
             case "$clang_version" in
@@ -138,7 +147,9 @@ jobs:
 
       - name: Setup build environment
         run: |
-          echo PATH=$(pwd)/aosp-clang/bin:$PATH | tee -a $GITHUB_ENV
+          if [ "$clang_type" = "aosp" ]; then
+            echo PATH=$(pwd)/aosp-clang/bin:$PATH | tee -a $GITHUB_ENV
+          fi
           clang --version
           aarch64-linux-gnu-ld --version || true
 
