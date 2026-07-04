@@ -114,6 +114,14 @@ jobs:
             echo "Patched user_arg_null_ptr dereference in event.c"
           fi
 
+          # selinux_hide.c 只在 5.10+ 编译, 但 ksud.c 引用了它的函数
+          # 在 ksud.c 末尾加空实现避免链接错误
+          KSUD=drivers/kernelsu/runtime/ksud.c
+          if [ -f "$KSUD" ] && ! grep -q "KSU_4_9_SELINUX_HIDE_STUB" "$KSUD" 2>/dev/null; then
+            echo "Adding selinux_hide stubs to ksud.c..."
+            printf '\n/* KSU_4_9_SELINUX_HIDE_STUB */\nint ksu_selinux_hide_handle_second_stage(void *data) { return 0; }\nint ksu_selinux_hide_handle_post_fs_data(void) { return 0; }\n' >> "$KSUD"
+          fi
+
       - name: Apply kernel patches
         run: |
           while read -r line; do
