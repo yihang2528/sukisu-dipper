@@ -113,20 +113,20 @@ jobs:
 
       - name: Apply SukiSU patches
         run: |
-          while read -r line; do
-            if [ -z "$line" ] || [[ "$line" == "#"* ]]; then
-              continue
-            fi
-            echo "Applying SukiSU patch: $line"
-            cd KernelSU
-            git apply "../this-repo/patches/$line" 2>/dev/null && echo "Applied with git apply" || {
-              echo "git apply failed, trying patch command..."
-              patch -p1 --forward < "../this-repo/patches/$line" 2>/dev/null && echo "Applied with patch" || {
-                echo "WARNING: Patch $line could not be applied cleanly, skipping"
-              }
-            }
-            cd ..
-          done <<<"$sukisu_patch"
+          # SukiSU is a symlink to KernelSU/kernel, not a real git repo
+          # so git apply won't work. Use sed/patch directly on the files.
+          
+          # Fix: 4.9 arm64 kernel doesn't have syscall_fn_t or sys_call_ptr_t
+          # SukiSU's syscall_hook.h only defines it for x86_64
+          SYSCALL_HOOK=drivers/kernelsu/hook/syscall_hook.h
+          if grep -q "elif defined(__aarch64__)" "$SYSCALL_HOOK" 2>/dev/null; then
+            echo "arm64 syscall_fn_t typedef already exists"
+          else
+            echo "Adding arm64 syscall_fn_t typedef..."
+            sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel doesn'"'"'t have syscall_fn_t or sys_call_ptr_t */\ntypedef void (*syscall_fn_t)(void);' "$SYSCALL_HOOK"
+            echo "=== After patch ==="
+            head -15 "$SYSCALL_HOOK"
+          fi
 
       - name: Patch Makefiles for GCC 11 compatibility
         run: |
