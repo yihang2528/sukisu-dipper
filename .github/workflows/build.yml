@@ -151,25 +151,27 @@ jobs:
 
       - name: Build kernel
         run: |
-          # 4.9 kernel on GCC 10+ needs -fno-common fix for dtc yylloc multiple definition
-          # Also use GCC for everything (not Clang) for maximum 4.9 compatibility
-          export flags=" \
-            O=out \
-            ARCH=arm64 \
+          # 4.9 kernel on GCC 10+ needs -fcommon fix for dtc yylloc multiple definition
+          export KCFLAGS="-fcommon -Wno-error"
+          export HOSTCFLAGS="-fcommon"
+          export HOSTCC=gcc
+
+          make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            HOSTCC=gcc \
-            HOSTCFLAGS='-fcommon' \
-            KCFLAGS='-fcommon -Wno-error' \
-          "
-
-          make $flags ${{ env.defconfig }}
+            ${{ env.defconfig }}
 
           # 显示 KSU 相关配置
           echo "=== KSU config ==="
           grep -i "KSU\|KPROBES\|KPM" out/.config || true
 
-          make $flags -j$(nproc --all) 2>&1 | tail -80
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            HOSTCC=gcc \
+            HOSTCFLAGS="-fcommon" \
+            KCFLAGS="-fcommon -Wno-error" \
+            -j$(nproc --all) 2>&1 | tail -80
 
           # 检查编译产物
           ls -la out/arch/arm64/boot/Image.gz-dtb || {
