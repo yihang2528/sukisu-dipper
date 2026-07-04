@@ -123,22 +123,24 @@ jobs:
             sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel does not have syscall_fn_t */\ntypedef void (*syscall_fn_t)(void);' "$SYSCALL_HOOK"
           fi
 
-          # Fix 2: SukiSU references many headers that don't exist in 4.9 kernel (5.0+ only)
-          # Create stub headers so #include doesn't fail
-          STUB_DIR=include/linux
-          for hdr in compiler_types.h pgtable.h sched/task.h; do
-            if [ ! -f "$STUB_DIR/$hdr" ]; then
-              mkdir -p "$(dirname "$STUB_DIR/$hdr")"
-              echo "Creating stub: $STUB_DIR/$hdr"
-              echo "/* Stub for 4.9 kernel - $hdr not available */" > "$STUB_DIR/$hdr"
-              echo "#ifndef _LINUX_$(echo $hdr | tr '/.' '_')_STUB" >> "$STUB_DIR/$hdr"
-              echo "#define _LINUX_$(echo $hdr | tr '/.' '_')_STUB" >> "$STUB_DIR/$hdr"
-              # For pgtable.h, include the arm64 version
-              if echo "$hdr" | grep -q "pgtable"; then
-                echo '#include <asm/pgtable.h>' >> "$STUB_DIR/$hdr"
+          # Fix 2: SukiSU references many 5.0+ headers not in 4.9 kernel.
+          # Scan all SukiSU files for #include <linux/xxx.h> and <asm/xxx.h>,
+          # check if the header exists, create empty stub if not.
+          echo "Scanning SukiSU for missing headers..."
+          for prefix in linux asm; do
+            grep -rh "#include <$prefix/" drivers/kernelsu/ 2>/dev/null | \
+              sed "s/.*#include <\\($prefix/[^>]*\\)>.*/\\1/" | sort -u | while read hdr; do
+              if [ "$prefix" = "linux" ]; then
+                target="include/$hdr"
+              else
+                target="arch/arm64/include/$hdr"
               fi
-              echo "#endif" >> "$STUB_DIR/$hdr"
-            fi
+              if [ ! -f "$target" ] && [ ! -f "include/$hdr" ]; then
+                echo "  Creating stub: $target"
+                mkdir -p "$(dirname "$target")"
+                printf '/* Stub for 4.9 kernel - %s not available */\n#ifndef _%s_STUB\n#define _%s_STUB\n#endif\n' "$hdr" "$(echo $hdr | tr '/.' '_')" "$(echo $hdr | tr '/.' '_')" > "$target"
+              fi
+            done
           done
 
           echo "=== SukiSU patches applied ==="
