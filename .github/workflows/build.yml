@@ -55,11 +55,18 @@ jobs:
           sudo apt install -y \
             binutils-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
+            g++-aarch64-linux-gnu \
             bc \
             bison \
             flex \
             libssl-dev \
-            python3
+            python3 \
+            cpio
+
+          # 4.9 kernel needs python2, create symlink
+          sudo ln -sf /usr/bin/python3 /usr/bin/python
+          sudo ln -sf /usr/bin/python3 /usr/bin/python2
 
       - name: Checkout kernel source
         uses: actions/checkout@v4
@@ -93,6 +100,10 @@ jobs:
           grep -q "CONFIG_HAVE_KPROBES=y" $DEFCONFIG || echo 'CONFIG_HAVE_KPROBES=y' >> $DEFCONFIG
           grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG || echo 'CONFIG_KPROBE_EVENTS=y' >> $DEFCONFIG
           grep -q "CONFIG_KSU=y" $DEFCONFIG || echo 'CONFIG_KSU=y' >> $DEFCONFIG
+
+          # Fix: GCC 13+ compatibility - disable stackprotector_strong (not recognized)
+          sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' $DEFCONFIG
+          sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/' $DEFCONFIG || true
 
           # KPM 支持 (可选, 需要 KALLSYMS)
           # echo 'CONFIG_KPM=y' >> $DEFCONFIG
