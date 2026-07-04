@@ -123,20 +123,21 @@ jobs:
             sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel does not have syscall_fn_t */\ntypedef void (*syscall_fn_t)(void);' "$SYSCALL_HOOK"
           fi
 
-          # Fix 2: 4.9 kernel doesn't have linux/compiler_types.h (5.0+ only)
-          # Remove or replace the include in all SukiSU files
-          echo "Removing linux/compiler_types.h includes..."
-          grep -rl "linux/compiler_types.h" drivers/kernelsu/ 2>/dev/null | while read f; do
-            echo "  Patching: $f"
-            sed -i 's|#include <linux/compiler_types.h>|/* compiler_types.h not in 4.9 kernel */|g' "$f"
-          done
-
-          # Fix 3: 4.9 kernel may not have other newer headers - check and stub
-          # linux/sched/task.h might not exist in 4.9
-          grep -rl "linux/sched/task.h" drivers/kernelsu/ 2>/dev/null | while read f; do
-            if [ ! -f include/linux/sched/task.h ]; then
-              echo "Removing linux/sched/task.h from $f (not in 4.9)"
-              sed -i 's|#include <linux/sched/task.h>|/* sched/task.h not in 4.9 */|g' "$f"
+          # Fix 2: SukiSU references many headers that don't exist in 4.9 kernel (5.0+ only)
+          # Create stub headers so #include doesn't fail
+          STUB_DIR=include/linux
+          for hdr in compiler_types.h pgtable.h sched/task.h; do
+            if [ ! -f "$STUB_DIR/$hdr" ]; then
+              mkdir -p "$(dirname "$STUB_DIR/$hdr")"
+              echo "Creating stub: $STUB_DIR/$hdr"
+              echo "/* Stub for 4.9 kernel - $hdr not available */" > "$STUB_DIR/$hdr"
+              echo "#ifndef _LINUX_$(echo $hdr | tr '/.' '_')_STUB" >> "$STUB_DIR/$hdr"
+              echo "#define _LINUX_$(echo $hdr | tr '/.' '_')_STUB" >> "$STUB_DIR/$hdr"
+              # For pgtable.h, include the arm64 version
+              if echo "$hdr" | grep -q "pgtable"; then
+                echo '#include <asm/pgtable.h>' >> "$STUB_DIR/$hdr"
+              fi
+              echo "#endif" >> "$STUB_DIR/$hdr"
             fi
           done
 
