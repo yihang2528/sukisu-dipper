@@ -162,26 +162,33 @@ jobs:
 
       - name: Build kernel
         run: |
-          # 4.9 kernel on GCC 10+ needs -fcommon fix for dtc yylloc multiple definition
-          export KCFLAGS="-fcommon -Wno-error"
-          export HOSTCFLAGS="-fcommon"
-          export HOSTCC=gcc
-
-          make O=out ARCH=arm64 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            ${{ env.defconfig }}
-
-          # 显示 KSU 相关配置
-          echo "=== KSU config ==="
-          grep -i "KSU\|KPROBES\|KPM" out/.config || true
+          # Fix: 4.9 kernel's Makefile.build has a "forbidden warning" system that
+          # treats certain GCC warnings as errors. Patch it to not error on warnings.
+          sed -i 's/-Werror//' scripts/Makefile.build
+          sed -i 's/-Werror//' Makefile
+          # Also fix the specific warning
+          sed -i 's/CC_HAVEWarnings/CC_NOWarnings/g' scripts/Makefile.build || true
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=gcc \
             HOSTCFLAGS="-fcommon" \
-            KCFLAGS="-fcommon -Wno-error=attribute-alias -Wno-error=unused-const-variable -Wno-error=misleading-indentation -Wno-error=stringop-overflow -Wno-error=restrict -Wno-error=sizeof-pointer-memaccess" \
+            ${{ env.defconfig }}
+
+          # 显示 KSU 相关配置
+          echo "=== KSU config ==="
+          grep -i "KSU\|KPROBES\|KPM" out/.config || true
+
+          # Remove -Werror from the generated config
+          sed -i 's/-Werror//g' out/Makefile 2>/dev/null || true
+
+          make O=out ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            HOSTCC=gcc \
+            HOSTCFLAGS="-fcommon" \
+            KCFLAGS="-fcommon -Wno-error" \
             -j$(nproc --all) 2>&1 | tail -80
 
           # 检查编译产物
