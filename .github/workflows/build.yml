@@ -97,6 +97,23 @@ jobs:
           # 禁用 SUSFS (需要 susfs4ksu 补丁包, 暂不集成)
           echo "# CONFIG_KSU_SUSFS is not set" >> $DEFCONFIG
 
+          # 4.9 内核没有 'fallthrough' 宏 (5.0+ 才有), 添加定义
+          KSU_COMPAT=drivers/kernelsu/infra/kernel_compat.h
+          if [ -f "$KSU_COMPAT" ] && ! grep -q "fallthrough" "$KSU_COMPAT" 2>/dev/null; then
+            echo "Adding fallthrough macro..."
+            echo "#ifndef fallthrough" >> "$KSU_COMPAT"
+            echo "#define fallthrough do {} while (0)" >> "$KSU_COMPAT"
+            echo "#endif" >> "$KSU_COMPAT"
+          fi
+
+          # 4.9 内核 user_arg_ptr 类型差异: ksu_sulog_capture 期望值不是指针
+          # user_arg_null_ptr() 返回指针, 需要解引用
+          SULOG_EVENT=drivers/kernelsu/sulog/event.c
+          if [ -f "$SULOG_EVENT" ]; then
+            sed -i 's/#define USER_ARG_NULL user_arg_null_ptr()/#define USER_ARG_NULL (*user_arg_null_ptr())/' "$SULOG_EVENT"
+            echo "Patched user_arg_null_ptr dereference in event.c"
+          fi
+
       - name: Apply kernel patches
         run: |
           while read -r line; do
