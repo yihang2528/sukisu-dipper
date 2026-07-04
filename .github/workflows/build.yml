@@ -119,10 +119,12 @@ jobs:
           # so git apply won't work. Use sed directly on the files.
           
           # Fix 1: 4.9 arm64 kernel doesn't have syscall_fn_t or sys_call_ptr_t
+          # SukiSU's syscall_hook.h only defines it for x86_64
+          # Use a flexible function pointer type that can accept any args and return long
           SYSCALL_HOOK=drivers/kernelsu/hook/syscall_hook.h
           if ! grep -q "elif defined(__aarch64__)" "$SYSCALL_HOOK" 2>/dev/null; then
             echo "Adding arm64 syscall_fn_t typedef..."
-            sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel does not have syscall_fn_t */\ntypedef void (*syscall_fn_t)(void);' "$SYSCALL_HOOK"
+            sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel does not have syscall_fn_t */\ntypedef long (*syscall_fn_t)(const struct pt_regs *);' "$SYSCALL_HOOK"
           fi
 
           # Fix 2: SukiSU references 5.0+ headers not in 4.9 kernel.
