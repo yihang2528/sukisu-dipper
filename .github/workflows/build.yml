@@ -94,6 +94,9 @@ jobs:
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' $DEFCONFIG
           sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/' $DEFCONFIG || true
 
+          # 禁用 SUSFS (需要 susfs4ksu 补丁包, 暂不集成)
+          echo "# CONFIG_KSU_SUSFS is not set" >> $DEFCONFIG
+
       - name: Apply kernel patches
         run: |
           while read -r line; do
