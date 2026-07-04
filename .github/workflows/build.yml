@@ -114,19 +114,33 @@ jobs:
       - name: Apply SukiSU patches
         run: |
           # SukiSU is a symlink to KernelSU/kernel, not a real git repo
-          # so git apply won't work. Use sed/patch directly on the files.
+          # so git apply won't work. Use sed directly on the files.
           
-          # Fix: 4.9 arm64 kernel doesn't have syscall_fn_t or sys_call_ptr_t
-          # SukiSU's syscall_hook.h only defines it for x86_64
+          # Fix 1: 4.9 arm64 kernel doesn't have syscall_fn_t or sys_call_ptr_t
           SYSCALL_HOOK=drivers/kernelsu/hook/syscall_hook.h
-          if grep -q "elif defined(__aarch64__)" "$SYSCALL_HOOK" 2>/dev/null; then
-            echo "arm64 syscall_fn_t typedef already exists"
-          else
+          if ! grep -q "elif defined(__aarch64__)" "$SYSCALL_HOOK" 2>/dev/null; then
             echo "Adding arm64 syscall_fn_t typedef..."
-            sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel doesn'"'"'t have syscall_fn_t or sys_call_ptr_t */\ntypedef void (*syscall_fn_t)(void);' "$SYSCALL_HOOK"
-            echo "=== After patch ==="
-            head -15 "$SYSCALL_HOOK"
+            sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel does not have syscall_fn_t */\ntypedef void (*syscall_fn_t)(void);' "$SYSCALL_HOOK"
           fi
+
+          # Fix 2: 4.9 kernel doesn't have linux/compiler_types.h (5.0+ only)
+          # Remove or replace the include in all SukiSU files
+          echo "Removing linux/compiler_types.h includes..."
+          grep -rl "linux/compiler_types.h" drivers/kernelsu/ 2>/dev/null | while read f; do
+            echo "  Patching: $f"
+            sed -i 's|#include <linux/compiler_types.h>|/* compiler_types.h not in 4.9 kernel */|g' "$f"
+          done
+
+          # Fix 3: 4.9 kernel may not have other newer headers - check and stub
+          # linux/sched/task.h might not exist in 4.9
+          grep -rl "linux/sched/task.h" drivers/kernelsu/ 2>/dev/null | while read f; do
+            if [ ! -f include/linux/sched/task.h ]; then
+              echo "Removing linux/sched/task.h from $f (not in 4.9)"
+              sed -i 's|#include <linux/sched/task.h>|/* sched/task.h not in 4.9 */|g' "$f"
+            fi
+          done
+
+          echo "=== SukiSU patches applied ==="
 
       - name: Patch Makefiles for GCC 11 compatibility
         run: |
