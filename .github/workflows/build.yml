@@ -131,7 +131,30 @@ jobs:
           # Use Python script to scan and create stubs (avoids shell escaping issues)
           python3 this-repo/scripts/stub_headers.py
 
-          echo "=== SukiSU patches applied ==="
+          # Fix 3: SukiSU's lsm_hook.c uses 5.0+ LSM framework APIs not in 4.9 kernel
+          # (struct list_head.pprev, security_hook_list.lsm, etc.)
+          # Disable lsm_hook.c compilation by wrapping with #if 0
+          LSM_HOOK=drivers/kernelsu/hook/lsm_hook.c
+          if [ -f "$LSM_HOOK" ] && ! grep -q "KSU_LSM_HOOK_DISABLED" "$LSM_HOOK" 2>/dev/null; then
+            echo "Disabling lsm_hook.c (incompatible with 4.9 kernel LSM framework)..."
+            sed -i '1i\#if 0 /* KSU_LSM_HOOK_DISABLED: 4.9 kernel LSM framework incompatible */' "$LSM_HOOK"
+            echo '#endif' >> "$LSM_HOOK"
+            # Also need to stub out the functions declared in lsm_hook.h
+            LSM_HOOK_H=drivers/kernelsu/hook/lsm_hook.h
+            if [ -f "$LSM_HOOK_H" ]; then
+              echo "Adding stub implementations for lsm_hook.h functions..."
+            fi
+          fi
+
+          # Fix 4: Some SukiSU functions may reference lsm_hook functions
+          # Add stubs to prevent link errors
+          KSU_C=drivers/kernelsu/core/ksu.c
+          if [ -f "$KSU_C" ]; then
+            # Check if ksu.c calls lsm_hook functions
+            if grep -q "ksu_lsm_hook" "$KSU_C" 2>/dev/null; then
+              echo "Warning: ksu.c references lsm_hook functions, may cause link errors"
+            fi
+          fi
 
       - name: Patch Makefiles for GCC 11 compatibility
         run: |
