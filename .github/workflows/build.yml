@@ -172,7 +172,7 @@ jobs:
             HOSTCC=gcc \
             HOSTCFLAGS="-fcommon" \
             KCFLAGS="$CFLAGS_EXTRA" \
-            -j$(nproc --all) 2>&1 | tail -120
+            -j$(nproc --all) 2>&1
 
           # 检查编译产物
           ls -la out/arch/arm64/boot/Image.gz-dtb || {
