@@ -115,6 +115,10 @@ jobs:
             }
           done <<<"$kernel_patch"
 
+      - name: Install cross-compiler
+        run: |
+          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
       - name: Setup Clang
         run: |
           if [ "$clang_version" = "system" ]; then
@@ -147,11 +151,12 @@ jobs:
 
       - name: Build kernel
         run: |
+          # 4.9 kernel doesn't work well with full LLVM=1 (lld doesn't support --fix-cortex-a53-843419)
+          # Use GCC for linking, Clang only for compilation
           export flags=" \
             O=out \
             ARCH=arm64 \
-            LLVM=1 \
-            LLVM_IAS=1 \
+            CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
           "
@@ -162,7 +167,7 @@ jobs:
           echo "=== KSU config ==="
           grep -i "KSU\|KPROBES\|KPM" out/.config || true
 
-          make $flags -j$(nproc --all) 2>&1 | tail -50
+          make $flags -j$(nproc --all) 2>&1 | tail -80
 
           # 检查编译产物
           ls -la out/arch/arm64/boot/Image.gz-dtb || {
