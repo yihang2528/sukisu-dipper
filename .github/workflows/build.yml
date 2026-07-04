@@ -147,9 +147,13 @@ jobs:
         run: |
           set -x
 
-          # GCC 10+ 默认 -fno-common, 会导致 dtc 的 yylloc 多重定义
-          # 加 -fcommon 修复; -Wno-error 作为双保险 (Makefile 已 sed 过)
-          CFLAGS_EXTRA="-fcommon -Wno-error"
+          # 4.9 内核在 GCC 11+ 上有多种兼容性问题, 一次性全部修复:
+          # 1. -fno-common (GCC 10+): 修复 dtc yylloc 多重定义
+          # 2. -Wno-attribute-alias: GCC 11 对 syscalls.h 的假警告, 内核的 "forbidden warning" 机制把它当错误
+          # 3. -Wno-error: 作为双保险, 确保所有警告都不致命
+          # 4. -Wno-address-of-packed-member: 部分结构体对齐警告
+          # 5. -Wno-stringop-overflow: 误报
+          CFLAGS_EXTRA="-fcommon -Wno-error -Wno-attribute-alias -Wno-address-of-packed-member -Wno-stringop-overflow -Wno-restrict -Wno-maybe-uninitialized -Wno-array-bounds"
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -161,12 +165,6 @@ jobs:
 
           echo "=== KSU config ==="
           grep -i "KSU\|KPROBES\|KPM" out/.config || true
-
-          # out/Makefile 是 make defconfig 生成的, 里面也可能有 -Werror
-          # 用同样的安全模式替换 (不碰 -Werror-xxx)
-          sed -i 's/-Werror=/-Wno-error=/g' out/Makefile 2>/dev/null || true
-          sed -i 's/-Werror\([^a-zA-Z=-]\)/-Wno-error\1/g' out/Makefile 2>/dev/null || true
-          sed -i 's/-Werror$/-Wno-error/g' out/Makefile 2>/dev/null || true
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
