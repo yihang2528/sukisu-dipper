@@ -5,15 +5,11 @@ env:
   kernel_repository: MiCode/Xiaomi_Kernel_OpenSource
   kernel_branch: dipper-p-oss
   device: dipper
-  # Use system clang (Ubuntu 24.04 ships Clang 18, compatible with 4.9 kernel)
-  clang_version: system
   defconfig: |
     dipper_user_defconfig
   kernel_patch: |
     backport-path-umount.patch
     allow-init-exec-ksud-under-nosuid.patch
-  # SukiSU-Ultra 使用 main 分支 (最新版)
-  sukisu_branch: main
 
 on:
   workflow_dispatch:
@@ -39,16 +35,6 @@ jobs:
           SUKISU_REF="${{ inputs.sukisu_tag || 'main' }}"
           echo sukisu_ref=$SUKISU_REF | tee -a $GITHUB_ENV
 
-          clang_version=${{ env.clang_version }}
-          if [[ "$clang_version" = "r"* ]]; then
-            clang_type=aosp
-          elif [[ "$clang_version" = "system" ]]; then
-            clang_type=system
-          else
-            clang_type=vanilla
-          fi
-          echo clang_type=$clang_type | tee -a $GITHUB_ENV
-
       - name: Install packages
         run: |
           sudo apt update
@@ -65,8 +51,9 @@ jobs:
             python2 \
             cpio
 
-          # Create python symlink (4.9 kernel scripts expect 'python')
+          # 4.9 内核脚本需要 python (python2)
           sudo ln -sf /usr/bin/python2 /usr/bin/python
+          python --version
 
       - name: Checkout kernel source
         uses: actions/checkout@v4
@@ -90,25 +77,21 @@ jobs:
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${{ env.sukisu_ref }}/kernel/setup.sh" | bash -s ${{ env.sukisu_ref }}
 
           # 确认 SukiSU 已集成
+          echo "=== SukiSU kernel dir ==="
           ls -la drivers/kernelsu/
+          echo "=== SukiSU Kconfig ==="
           cat drivers/kernelsu/Kconfig || true
 
-          # 添加 KPROBES 配置 (非 GKI 内核需要)
-          # SukiSU Kconfig 依赖 KPROBES && EXT4_FS
+          # 添加 KPROBES 配置 (非 GKI 内核需要, SukiSU Kconfig 依赖 KPROBES && EXT4_FS)
           DEFCONFIG=arch/arm64/configs/${{ env.defconfig }}
           grep -q "CONFIG_KPROBES=y" $DEFCONFIG || echo 'CONFIG_KPROBES=y' >> $DEFCONFIG
           grep -q "CONFIG_HAVE_KPROBES=y" $DEFCONFIG || echo 'CONFIG_HAVE_KPROBES=y' >> $DEFCONFIG
           grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG || echo 'CONFIG_KPROBE_EVENTS=y' >> $DEFCONFIG
           grep -q "CONFIG_KSU=y" $DEFCONFIG || echo 'CONFIG_KSU=y' >> $DEFCONFIG
 
-          # Fix: GCC 13+ compatibility - disable stackprotector_strong (not recognized)
+          # GCC 11 兼容: aarch64 交叉编译器可能不支持 -fstack-protector-strong
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' $DEFCONFIG
           sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/' $DEFCONFIG || true
-
-          # KPM 支持 (可选, 需要 KALLSYMS)
-          # echo 'CONFIG_KPM=y' >> $DEFCONFIG
-          # echo 'CONFIG_KALLSYMS=y' >> $DEFCONFIG
-          # echo 'CONFIG_KALLSYMS_ALL=y' >> $DEFCONFIG
 
       - name: Apply kernel patches
         run: |
@@ -117,79 +100,66 @@ jobs:
               continue
             fi
             echo "Applying kernel patch: $line"
-            # Try git apply first, then patch command (more tolerant), then skip
+            # 容错: git apply → patch 命令 → 跳过
             git apply "this-repo/patches/$line" 2>/dev/null && echo "Applied with git apply" || {
               echo "git apply failed, trying patch command..."
               patch -p1 --forward < "this-repo/patches/$line" 2>/dev/null && echo "Applied with patch" || {
-                echo "WARNING: Patch $line could not be applied cleanly, skipping (may not be needed for this kernel version)"
+                echo "WARNING: Patch $line could not be applied cleanly, skipping"
               }
             }
           done <<<"$kernel_patch"
 
-      - name: Install cross-compiler
+      - name: Patch Makefiles for GCC 11 compatibility
         run: |
-          sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # 4.9 内核的 Makefile 和 scripts/Makefile.build 中有 -Werror 标志,
+          # GCC 11 会产生 4.9 时代不存在的警告 (如 -Wattribute-alias),
+          # -Werror 把这些警告变成错误导致编译失败.
+          #
+          # 修复: 将所有 -Werror 替换为 -Wno-error
+          #   -Werror           → -Wno-error          (全部警告不作为错误)
+          #   -Werror=xxx       → -Wno-error=xxx      (特定警告不作为错误)
+          #
+          # 不能用 s/-Werror//g (会删掉 -Werror=xxx 中的 -Werror, 留下 =xxx 导致 GCC 报错)
+          # 不能用 s/-Werror[= ]/-Wno-error=/g (会在 -Werror<空格> 的情况留下 -Wno-error= 但没有参数)
 
-      - name: Setup Clang
-        run: |
-          if [ "$clang_version" = "system" ]; then
-            # Use Ubuntu's system clang
-            sudo apt install -y clang lld llvm
-            echo "Using system Clang:"
-            clang --version
-          elif [ "$clang_type" = "vanilla" ]; then
-            wget -O - https://apt.llvm.org/llvm.sh 2>/dev/null | sudo bash -s -- $clang_version
-            echo PATH=/usr/lib/llvm-$clang_version/bin:$PATH | tee -a $GITHUB_ENV
-            /usr/lib/llvm-$clang_version/bin/clang --version
-          else
-            # AOSP Clang
-            aosp_clang_branch=$(
-              case "$clang_version" in
-                r365631c ) echo android11-release;;
-                r383902 | r416183b) echo master-kernel-build-2021 ;;
-                r450784e) echo master-kernel-build-2022 ;;
-                r487747c) echo main-kernel-build-2023 ;;
-                * ) echo main ;;
-              esac
-            )
-            echo "Downloading AOSP Clang $clang_version from branch $aosp_clang_branch"
-            mkdir -p aosp-clang
-            curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/$aosp_clang_branch/clang-$clang_version.tar.gz" | tar xz -C aosp-clang
-            echo PATH=$(pwd)/aosp-clang/bin:$PATH | tee -a $GITHUB_ENV
-            clang --version
-          fi
-          aarch64-linux-gnu-ld --version || true
+          echo "=== Before patch ==="
+          grep -n 'Werror' Makefile scripts/Makefile.build 2>/dev/null || echo "No -Werror found"
+
+          sed -i 's/-Werror/-Wno-error/g' Makefile
+          sed -i 's/-Werror/-Wno-error/g' scripts/Makefile.build
+
+          echo "=== After patch ==="
+          grep -n 'Werror\|Wno-error' Makefile scripts/Makefile.build 2>/dev/null || echo "No Werror flags found"
 
       - name: Build kernel
         run: |
-          # Fix: 4.9 kernel's Makefile.build has a "forbidden warning" system that
-          # treats certain GCC warnings as errors. Patch it to not error on warnings.
-          sed -i 's/-Werror//' scripts/Makefile.build
-          sed -i 's/-Werror//' Makefile
-          # Also fix the specific warning
-          sed -i 's/CC_HAVEWarnings/CC_NOWarnings/g' scripts/Makefile.build || true
+          set -x
+
+          # GCC 10+ 默认 -fno-common, 会导致 dtc 的 yylloc 多重定义
+          # 加 -fcommon 修复; -Wno-error 作为双保险 (Makefile 已 sed 过)
+          CFLAGS_EXTRA="-fcommon -Wno-error"
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=gcc \
             HOSTCFLAGS="-fcommon" \
+            KCFLAGS="$CFLAGS_EXTRA" \
             ${{ env.defconfig }}
 
-          # 显示 KSU 相关配置
           echo "=== KSU config ==="
           grep -i "KSU\|KPROBES\|KPM" out/.config || true
 
-          # Remove -Werror from the generated config
-          sed -i 's/-Werror//g' out/Makefile 2>/dev/null || true
+          # out/Makefile 是 make defconfig 生成的, 里面也可能有 -Werror
+          sed -i 's/-Werror/-Wno-error/g' out/Makefile 2>/dev/null || true
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=gcc \
             HOSTCFLAGS="-fcommon" \
-            KCFLAGS="-fcommon -Wno-error" \
-            -j$(nproc --all) 2>&1 | tail -80
+            KCFLAGS="$CFLAGS_EXTRA" \
+            -j$(nproc --all) 2>&1 | tail -120
 
           # 检查编译产物
           ls -la out/arch/arm64/boot/Image.gz-dtb || {
