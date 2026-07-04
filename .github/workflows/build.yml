@@ -16,10 +16,6 @@ env:
 on:
   workflow_dispatch:
     inputs:
-      sukisu_tag:
-        description: "SukiSU-Ultra tag/branch (default: main)"
-        required: false
-        default: "main"
       allow_rebuild:
         description: "Force rebuild"
         type: boolean
@@ -34,8 +30,7 @@ jobs:
     steps:
       - name: Set env
         run: |
-          SUKISU_REF="${{ inputs.sukisu_tag || 'main' }}"
-          echo sukisu_ref=$SUKISU_REF | tee -a $GITHUB_ENV
+          echo "Using SukiSU-Ultra builtin branch"
 
       - name: Install packages
         run: |
@@ -77,8 +72,8 @@ jobs:
 
       - name: Setup SukiSU-Ultra
         run: |
-          # 使用 SukiSU-Ultra 的 setup.sh 集成到内核源码
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${{ env.sukisu_ref }}/kernel/setup.sh" | bash -s ${{ env.sukisu_ref }}
+          # 使用 SukiSU-Ultra builtin 分支 (专门为非 GKI 旧内核设计, 无 5.0+ API 依赖)
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/setup.sh" | bash -s builtin
 
           # 确认 SukiSU 已集成
           echo "=== SukiSU kernel dir ==="
@@ -86,14 +81,16 @@ jobs:
           echo "=== SukiSU Kconfig ==="
           cat drivers/kernelsu/Kconfig || true
 
-          # 添加 KPROBES 配置 (非 GKI 内核需要, SukiSU Kconfig 依赖 KPROBES && EXT4_FS)
+          # 添加配置
           DEFCONFIG=arch/arm64/configs/${{ env.defconfig }}
-          grep -q "CONFIG_KPROBES=y" $DEFCONFIG || echo 'CONFIG_KPROBES=y' >> $DEFCONFIG
-          grep -q "CONFIG_HAVE_KPROBES=y" $DEFCONFIG || echo 'CONFIG_HAVE_KPROBES=y' >> $DEFCONFIG
-          grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG || echo 'CONFIG_KPROBE_EVENTS=y' >> $DEFCONFIG
           grep -q "CONFIG_KSU=y" $DEFCONFIG || echo 'CONFIG_KSU=y' >> $DEFCONFIG
+          # builtin 分支的 KSU 不依赖 KPROBES, 但加上也无妨
+          grep -q "CONFIG_KPROBES=y" $DEFCONFIG || echo 'CONFIG_KPROBES=y' >> $DEFCONFIG
+          grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG || echo 'CONFIG_KPROBE_EVENTS=y' >> $DEFCONFIG
+          # THREAD_INFO_IN_TASK 是 SUSFS 的依赖
+          grep -q "CONFIG_THREAD_INFO_IN_TASK=y" $DEFCONFIG || echo 'CONFIG_THREAD_INFO_IN_TASK=y' >> $DEFCONFIG
 
-          # GCC 11 兼容: aarch64 交叉编译器可能不支持 -fstack-protector-strong
+          # GCC 11 兼容: 禁用 stackprotector
           sed -i 's/CONFIG_CC_STACKPROTECTOR_STRONG=y/# CONFIG_CC_STACKPROTECTOR_STRONG is not set/' $DEFCONFIG
           sed -i 's/CONFIG_CC_STACKPROTECTOR=y/# CONFIG_CC_STACKPROTECTOR is not set/' $DEFCONFIG || true
 
@@ -112,53 +109,6 @@ jobs:
               }
             }
           done <<<"$kernel_patch"
-
-      - name: Apply SukiSU patches
-        run: |
-          # SukiSU is a symlink to KernelSU/kernel, not a real git repo
-          # so git apply won't work. Use sed directly on the files.
-          
-          # Fix 1: 4.9 arm64 kernel doesn't have syscall_fn_t or sys_call_ptr_t
-          # SukiSU's syscall_hook.h only defines it for x86_64
-          # Use a flexible function pointer type that can accept any args and return long
-          SYSCALL_HOOK=drivers/kernelsu/hook/syscall_hook.h
-          if ! grep -q "elif defined(__aarch64__)" "$SYSCALL_HOOK" 2>/dev/null; then
-            echo "Adding arm64 syscall_fn_t typedef..."
-            sed -i '/#endif/i\#elif defined(__aarch64__)\n/* 4.9 arm64 kernel does not have syscall_fn_t */\ntypedef long (*syscall_fn_t)(const struct pt_regs *);' "$SYSCALL_HOOK"
-          fi
-
-          # Fix 2: SukiSU references 5.0+ headers not in 4.9 kernel.
-          # Use Python script to scan and create stubs (avoids shell escaping issues)
-          python3 this-repo/scripts/stub_headers.py
-
-          # Fix 3: SukiSU's lsm_hook.c uses 5.0+ LSM framework APIs not in 4.9 kernel
-          # (struct list_head.pprev, security_hook_list.lsm, etc.)
-          # Disable lsm_hook.c compilation by wrapping with #if 0
-          LSM_HOOK=drivers/kernelsu/hook/lsm_hook.c
-          if [ -f "$LSM_HOOK" ] && ! grep -q "KSU_LSM_HOOK_DISABLED" "$LSM_HOOK" 2>/dev/null; then
-            echo "Disabling lsm_hook.c (incompatible with 4.9 kernel LSM framework)..."
-            sed -i '1i\#if 0 /* KSU_LSM_HOOK_DISABLED: 4.9 kernel LSM framework incompatible */' "$LSM_HOOK"
-            echo '#endif' >> "$LSM_HOOK"
-            # Also need to stub out the functions declared in lsm_hook.h
-            LSM_HOOK_H=drivers/kernelsu/hook/lsm_hook.h
-            if [ -f "$LSM_HOOK_H" ]; then
-              echo "Adding stub implementations for lsm_hook.h functions..."
-            fi
-          fi
-
-          # Fix 4: Some SukiSU functions may reference lsm_hook functions
-          # Add stubs to prevent link errors
-          KSU_C=drivers/kernelsu/core/ksu.c
-          if [ -f "$KSU_C" ]; then
-            # Check if ksu.c calls lsm_hook functions
-            if grep -q "ksu_lsm_hook" "$KSU_C" 2>/dev/null; then
-              echo "Warning: ksu.c references lsm_hook functions, may cause link errors"
-            fi
-          fi
-
-      - name: Apply 4.9 compatibility patches
-        run: |
-          python3 this-repo/scripts/patch_49_compat.py
 
       - name: Patch Makefiles for GCC 11 compatibility
         run: |
@@ -239,7 +189,7 @@ jobs:
 
           cat > AnyKernel3-master/anykernel.sh <<EOF
           properties() { '
-          kernel.string=SukiSU-Ultra (${{ env.sukisu_ref }}) for Xiaomi Mi 8 ($device)
+          kernel.string=SukiSU-Ultra (builtin) for Xiaomi Mi 8 ($device)
           do.devicecheck=1
           do.modules=0
           do.cleanup=1
@@ -279,14 +229,14 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: sukisu-${{ env.sukisu_ref }}-dipper-${{ env.kernel_commit_id }}
+          tag_name: sukisu-builtin-dipper-${{ env.kernel_commit_id }}
           body: |
             ## SukiSU-Ultra Kernel for Xiaomi Mi 8 (dipper)
 
             **Device:** Xiaomi Mi 8 (dipper)
             **Android:** 9 (Pie)
             **Kernel:** ${{ env.kernel_version }} (${{ env.kernel_commit_id }})
-            **SukiSU-Ultra:** ${{ env.sukisu_ref }}
+            **SukiSU-Ultra:** builtin branch
 
             ### Kernel Source
             https://github.com/${{ env.kernel_repository }}/tree/${{ env.kernel_branch }}
