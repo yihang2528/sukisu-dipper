@@ -156,6 +156,10 @@ jobs:
             fi
           fi
 
+      - name: Apply 4.9 compatibility patches
+        run: |
+          python3 this-repo/scripts/patch_49_compat.py
+
       - name: Patch Makefiles for GCC 11 compatibility
         run: |
           # 4.9 内核的 Makefile 和 scripts/Makefile.build 中有 -Werror 标志,
