@@ -5,8 +5,8 @@ env:
   kernel_repository: MiCode/Xiaomi_Kernel_OpenSource
   kernel_branch: dipper-p-oss
   device: dipper
-  # AOSP Clang r365631c = Clang 9. For 4.9 kernel, use vanilla Clang 11 from LLVM apt
-  clang_version: 11
+  # Use system clang (Ubuntu 24.04 ships Clang 18, compatible with 4.9 kernel)
+  clang_version: system
   defconfig: |
     dipper_user_defconfig
   kernel_patch: |
@@ -42,6 +42,8 @@ jobs:
           clang_version=${{ env.clang_version }}
           if [[ "$clang_version" = "r"* ]]; then
             clang_type=aosp
+          elif [[ "$clang_version" = "system" ]]; then
+            clang_type=system
           else
             clang_type=vanilla
           fi
@@ -113,44 +115,34 @@ jobs:
             }
           done <<<"$kernel_patch"
 
-      - name: Setup Clang (Vanilla LLVM)
-        if: env.clang_type == 'vanilla'
+      - name: Setup Clang
         run: |
-          # Install Clang from LLVM apt repository
-          wget -O - https://apt.llvm.org/llvm.sh 2>/dev/null | sudo bash -s -- $clang_version
-          echo PATH=/usr/lib/llvm-$clang_version/bin:$PATH | tee -a $GITHUB_ENV
-          /usr/lib/llvm-$clang_version/bin/clang --version
-
-      - name: Setup Clang (AOSP)
-        if: env.clang_type == 'aosp'
-        uses: actions/cache@v4
-        id: clang-cache
-        with:
-          path: aosp-clang
-          key: aosp-clang-${{ env.clang_version }}-v2
-
-      - name: Download AOSP Clang (if not cached)
-        if: env.clang_type == 'aosp' && steps.clang-cache.outputs.cache-hit != 'true'
-        run: |
-          aosp_clang_branch=$(
-            case "$clang_version" in
-              r365631c ) echo android11-release;;
-              r383902 | r416183b) echo master-kernel-build-2021 ;;
-              r450784e) echo master-kernel-build-2022 ;;
-              r487747c) echo main-kernel-build-2023 ;;
-              * ) echo main ;;
-            esac
-          )
-          echo "Downloading AOSP Clang $clang_version from branch $aosp_clang_branch"
-          mkdir -p aosp-clang
-          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/$aosp_clang_branch/clang-$clang_version.tar.gz" | tar xz -C aosp-clang
-
-      - name: Setup build environment
-        run: |
-          if [ "$clang_type" = "aosp" ]; then
+          if [ "$clang_version" = "system" ]; then
+            # Use Ubuntu's system clang
+            sudo apt install -y clang lld llvm
+            echo "Using system Clang:"
+            clang --version
+          elif [ "$clang_type" = "vanilla" ]; then
+            wget -O - https://apt.llvm.org/llvm.sh 2>/dev/null | sudo bash -s -- $clang_version
+            echo PATH=/usr/lib/llvm-$clang_version/bin:$PATH | tee -a $GITHUB_ENV
+            /usr/lib/llvm-$clang_version/bin/clang --version
+          else
+            # AOSP Clang
+            aosp_clang_branch=$(
+              case "$clang_version" in
+                r365631c ) echo android11-release;;
+                r383902 | r416183b) echo master-kernel-build-2021 ;;
+                r450784e) echo master-kernel-build-2022 ;;
+                r487747c) echo main-kernel-build-2023 ;;
+                * ) echo main ;;
+              esac
+            )
+            echo "Downloading AOSP Clang $clang_version from branch $aosp_clang_branch"
+            mkdir -p aosp-clang
+            curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/$aosp_clang_branch/clang-$clang_version.tar.gz" | tar xz -C aosp-clang
             echo PATH=$(pwd)/aosp-clang/bin:$PATH | tee -a $GITHUB_ENV
+            clang --version
           fi
-          clang --version
           aarch64-linux-gnu-ld --version || true
 
       - name: Build kernel
