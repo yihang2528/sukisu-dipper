@@ -10,6 +10,8 @@ env:
   kernel_patch: |
     backport-path-umount.patch
     allow-init-exec-ksud-under-nosuid.patch
+  sukisu_patch: |
+    sukisu-arm64-syscall-fn-t.patch
 
 on:
   workflow_dispatch:
@@ -108,6 +110,23 @@ jobs:
               }
             }
           done <<<"$kernel_patch"
+
+      - name: Apply SukiSU patches
+        run: |
+          while read -r line; do
+            if [ -z "$line" ] || [[ "$line" == "#"* ]]; then
+              continue
+            fi
+            echo "Applying SukiSU patch: $line"
+            cd KernelSU
+            git apply "../this-repo/patches/$line" 2>/dev/null && echo "Applied with git apply" || {
+              echo "git apply failed, trying patch command..."
+              patch -p1 --forward < "../this-repo/patches/$line" 2>/dev/null && echo "Applied with patch" || {
+                echo "WARNING: Patch $line could not be applied cleanly, skipping"
+              }
+            }
+            cd ..
+          done <<<"$sukisu_patch"
 
       - name: Patch Makefiles for GCC 11 compatibility
         run: |

@@ -1,0 +1,13 @@
+--- a/kernel/hook/syscall_hook.h
++++ b/kernel/hook/syscall_hook.h
+@@ -6,6 +6,10 @@
+ #include <asm/syscall.h>
+ 
+ #if defined(__x86_64__)
+ typedef sys_call_ptr_t syscall_fn_t;
++#elif defined(__aarch64__)
++/* 4.9 arm64 kernel doesn't have syscall_fn_t or sys_call_ptr_t */
++typedef void (*syscall_fn_t)(void);
+ #endif
+ 
+ extern syscall_fn_t *ksu_syscall_table;
