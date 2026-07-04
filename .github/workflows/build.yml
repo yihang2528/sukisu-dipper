@@ -151,14 +151,16 @@ jobs:
 
       - name: Build kernel
         run: |
-          # 4.9 kernel doesn't work well with full LLVM=1 (lld doesn't support --fix-cortex-a53-843419)
-          # Use GCC for linking, Clang only for compilation
+          # 4.9 kernel on GCC 10+ needs -fno-common fix for dtc yylloc multiple definition
+          # Also use GCC for everything (not Clang) for maximum 4.9 compatibility
           export flags=" \
             O=out \
             ARCH=arm64 \
-            CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            HOSTCC=gcc \
+            HOSTCFLAGS='-fcommon' \
+            KCFLAGS='-fcommon -Wno-error' \
           "
 
           make $flags ${{ env.defconfig }}
