@@ -1,12 +1,12 @@
 name: Build SukiSU-Ultra Kernel for Xiaomi Mi 8 (dipper)
 
 env:
-  # 小米8官方内核源码 (Android 9 / Pie, kernel 4.9.112)
-  kernel_repository: MiCode/Xiaomi_Kernel_OpenSource
-  kernel_branch: dipper-p-oss
+  # LineageOS 内核源码 (Android 9 / Pie, kernel 4.9.200, better maintained than MiCode)
+  kernel_repository: LineageOS/android_kernel_xiaomi_sdm845
+  kernel_branch: lineage-16.0
   device: dipper
   defconfig: |
-    dipper_user_defconfig
+    dipper_defconfig
   kernel_patch: |
     backport-path-umount.patch
     allow-init-exec-ksud-under-nosuid.patch
