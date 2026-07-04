@@ -1,0 +1,240 @@
+name: Build SukiSU-Ultra Kernel for Xiaomi Mi 8 (dipper)
+
+env:
+  # 小米8官方内核源码 (Android 9 / Pie, kernel 4.9.112)
+  kernel_repository: MiCode/Xiaomi_Kernel_OpenSource
+  kernel_branch: dipper-p-oss
+  device: dipper
+  # AOSP Clang r365631c (Clang 9) 最兼容 4.9 内核
+  clang_version: r365631c
+  defconfig: |
+    dipper_user_defconfig
+  kernel_patch: |
+    backport-path-umount.patch
+    allow-init-exec-ksud-under-nosuid.patch
+  # SukiSU-Ultra 使用 main 分支 (最新版)
+  sukisu_branch: main
+
+on:
+  workflow_dispatch:
+    inputs:
+      sukisu_tag:
+        description: "SukiSU-Ultra tag/branch (default: main)"
+        required: false
+        default: "main"
+      allow_rebuild:
+        description: "Force rebuild"
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: Build kernel
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Set env
+        run: |
+          SUKISU_REF="${{ inputs.sukisu_tag || 'main' }}"
+          echo sukisu_ref=$SUKISU_REF | tee -a $GITHUB_ENV
+
+          clang_version=${{ env.clang_version }}
+          if [[ "$clang_version" = "r"* ]]; then
+            clang_type=aosp
+          else
+            clang_type=vanilla
+          fi
+          echo clang_type=$clang_type | tee -a $GITHUB_ENV
+
+      - name: Install packages
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            binutils-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu \
+            bc \
+            bison \
+            flex \
+            libssl-dev \
+            python3
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.kernel_repository }}
+          ref: ${{ env.kernel_branch }}
+
+      - name: Checkout this repo (patches + workflow)
+        uses: actions/checkout@v4
+        with:
+          path: this-repo
+
+      - name: Get kernel commit info
+        run: |
+          echo kernel_commit_id=$(git rev-parse --short HEAD) | tee -a $GITHUB_ENV
+          echo kernel_version=$(make kernelversion 2>/dev/null || echo "4.9.112") | tee -a $GITHUB_ENV
+
+      - name: Setup SukiSU-Ultra
+        run: |
+          # 使用 SukiSU-Ultra 的 setup.sh 集成到内核源码
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/${{ env.sukisu_ref }}/kernel/setup.sh" | bash -s ${{ env.sukisu_ref }}
+
+          # 确认 SukiSU 已集成
+          ls -la drivers/kernelsu/
+          cat drivers/kernelsu/Kconfig || true
+
+          # 添加 KPROBES 配置 (非 GKI 内核需要)
+          # SukiSU Kconfig 依赖 KPROBES && EXT4_FS
+          DEFCONFIG=arch/arm64/configs/${{ env.defconfig }}
+          grep -q "CONFIG_KPROBES=y" $DEFCONFIG || echo 'CONFIG_KPROBES=y' >> $DEFCONFIG
+          grep -q "CONFIG_HAVE_KPROBES=y" $DEFCONFIG || echo 'CONFIG_HAVE_KPROBES=y' >> $DEFCONFIG
+          grep -q "CONFIG_KPROBE_EVENTS=y" $DEFCONFIG || echo 'CONFIG_KPROBE_EVENTS=y' >> $DEFCONFIG
+          grep -q "CONFIG_KSU=y" $DEFCONFIG || echo 'CONFIG_KSU=y' >> $DEFCONFIG
+
+          # KPM 支持 (可选, 需要 KALLSYMS)
+          # echo 'CONFIG_KPM=y' >> $DEFCONFIG
+          # echo 'CONFIG_KALLSYMS=y' >> $DEFCONFIG
+          # echo 'CONFIG_KALLSYMS_ALL=y' >> $DEFCONFIG
+
+      - name: Apply kernel patches
+        run: |
+          while read -r line; do
+            if [ -z "$line" ] || [[ "$line" == "#"* ]]; then
+              continue
+            fi
+            echo "Applying kernel patch: $line"
+            git apply "this-repo/patches/$line" || {
+              echo "WARNING: Patch $line failed to apply, trying with --ignore-whitespace"
+              git apply --ignore-whitespace "this-repo/patches/$line" || {
+                echo "ERROR: Patch $line failed completely"
+                exit 1
+              }
+            }
+          done <<<"$kernel_patch"
+
+      - name: Download AOSP Clang
+        uses: actions/cache@v4
+        id: clang-cache
+        with:
+          path: aosp-clang
+          key: aosp-clang-${{ env.clang_version }}-v2
+
+      - name: Download AOSP Clang (if not cached)
+        if: steps.clang-cache.outputs.cache-hit != 'true'
+        run: |
+          aosp_clang_branch=$(
+            case "$clang_version" in
+              r365631c ) echo android11-release;;
+              r383902 | r416183b) echo master-kernel-build-2021 ;;
+              r450784e) echo master-kernel-build-2022 ;;
+              r487747c) echo main-kernel-build-2023 ;;
+              * ) echo main ;;
+            esac
+          )
+          echo "Downloading AOSP Clang $clang_version from branch $aosp_clang_branch"
+          mkdir -p aosp-clang
+          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/$aosp_clang_branch/clang-$clang_version.tar.gz" | tar xz -C aosp-clang
+
+      - name: Setup build environment
+        run: |
+          echo PATH=$(pwd)/aosp-clang/bin:$PATH | tee -a $GITHUB_ENV
+          clang --version
+          aarch64-linux-gnu-ld --version || true
+
+      - name: Build kernel
+        run: |
+          export flags=" \
+            O=out \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          "
+
+          make $flags ${{ env.defconfig }}
+
+          # 显示 KSU 相关配置
+          echo "=== KSU config ==="
+          grep -i "KSU\|KPROBES\|KPM" out/.config || true
+
+          make $flags -j$(nproc --all) 2>&1 | tail -50
+
+          # 检查编译产物
+          ls -la out/arch/arm64/boot/Image.gz-dtb || {
+            echo "ERROR: Image.gz-dtb not found!"
+            ls -la out/arch/arm64/boot/ || true
+            exit 1
+          }
+
+      - name: Pack with AnyKernel3
+        run: |
+          curl -Lo AnyKernel3.zip https://github.com/osm0sis/AnyKernel3/archive/refs/heads/master.zip
+          unzip AnyKernel3.zip
+
+          cat > AnyKernel3-master/anykernel.sh <<EOF
+          properties() { '
+          kernel.string=SukiSU-Ultra (${{ env.sukisu_ref }}) for Xiaomi Mi 8 ($device)
+          do.devicecheck=1
+          do.modules=0
+          do.cleanup=1
+          do.cleanuponabort=1
+          device.name1=$device
+          device.name2=dipper
+          device.name3=Mi8
+          device.name4=Xiaomi_Mi_8
+          '; }
+
+          block=auto
+          is_slot_device=auto
+          ramdisk_compression=auto
+          patch_vbmeta_flag=auto
+
+          . tools/ak3-core.sh
+          split_boot
+          flash_boot
+          EOF
+
+          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3-master/
+          if [ -f out/arch/arm64/boot/dtbo.img ]; then
+            cp out/arch/arm64/boot/dtbo.img AnyKernel3-master/
+          fi
+
+          cd AnyKernel3-master
+          rm -rf .git* README.md
+          zip -r ../boot.zip *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SukiSU-dipper-boot
+          path: boot.zip
+          retention-days: 30
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sukisu-${{ env.sukisu_ref }}-dipper-${{ env.kernel_commit_id }}
+          body: |
+            ## SukiSU-Ultra Kernel for Xiaomi Mi 8 (dipper)
+
+            **Device:** Xiaomi Mi 8 (dipper)
+            **Android:** 9 (Pie)
+            **Kernel:** ${{ env.kernel_version }} (${{ env.kernel_commit_id }})
+            **SukiSU-Ultra:** ${{ env.sukisu_ref }}
+
+            ### Kernel Source
+            https://github.com/${{ env.kernel_repository }}/tree/${{ env.kernel_branch }}
+
+            ### SukiSU-Ultra
+            https://github.com/SukiSU-Ultra/SukiSU-Ultra
+
+            ### Installation
+            1. Download `boot.zip`
+            2. Flash via TWRP/OrangeFox recovery
+            3. Install SukiSU-Ultra manager APK from [releases](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases)
+
+            > ⚠️ Flash at your own risk. Make sure to have a backup of your stock boot.img.
+          files: |
+            boot.zip
