@@ -81,17 +81,25 @@ patch_file(pm, [
     ("FIXMAP_PAGE_TEXT", "PAGE_KERNEL_EXEC"),
 ])
 
-# 3. lsm_hook stubs - provide empty implementations
-# core/init.c calls ksu_lsm_hook_init() and ksu_lsm_hook_exit()
-init_c = os.path.join(base, "core/init.c")
-insert_stubs(init_c, [
-    "int ksu_lsm_hook_init(void) { return 0; }",
-    "void ksu_lsm_hook_exit(void) {}",
-    "int ksu_lsm_hook(struct ksu_lsm_hook *hook) { return 0; }",
-    "void ksu_lsm_unhook(struct ksu_lsm_hook *hook) {}",
-    "int ksu_register_lsm_hook(struct ksu_lsm_hook *hook) { return 0; }",
-    "void ksu_unregister_lsm_hook(struct ksu_lsm_hook *hook) {}",
-])
+# 2. lsm_hook stubs - provide empty implementations
+# lsm_hook.c is wrapped with #if 0, so functions need stubs
+# Add them to the END of lsm_hook.c (after the #endif)
+lsm_c = os.path.join(base, "hook/lsm_hook.c")
+if os.path.exists(lsm_c):
+    content = open(lsm_c).read()
+    if "KSU_4_9_LSM_STUBS" not in content:
+        stubs_code = """
+/* KSU_4_9_LSM_STUBS: empty implementations (lsm_hook.c disabled for 4.9) */
+int ksu_lsm_hook(struct ksu_lsm_hook *hook) { return 0; }
+void ksu_lsm_unhook(struct ksu_lsm_hook *hook) {}
+int ksu_register_lsm_hook(struct ksu_lsm_hook *hook) { return 0; }
+void ksu_unregister_lsm_hook(struct ksu_lsm_hook *hook) {}
+int ksu_lsm_hook_init(void) { return 0; }
+void ksu_lsm_hook_exit(void) {}
+"""
+        content += stubs_code
+        open(lsm_c, "w").write(content)
+        print(f"  {lsm_c}: added lsm_hook stubs after #endif")
 
 # 4. Check for other potential issues
 # set_memory.h stub - if SukiSU calls set_memory_* functions, they need real impl
