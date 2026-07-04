@@ -30,7 +30,7 @@ on:
 jobs:
   build:
     name: Build kernel
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
@@ -62,11 +62,11 @@ jobs:
             flex \
             libssl-dev \
             python3 \
+            python2 \
             cpio
 
-          # 4.9 kernel needs python2, create symlink
-          sudo ln -sf /usr/bin/python3 /usr/bin/python
-          sudo ln -sf /usr/bin/python3 /usr/bin/python2
+          # Create python symlink (4.9 kernel scripts expect 'python')
+          sudo ln -sf /usr/bin/python2 /usr/bin/python
 
       - name: Checkout kernel source
         uses: actions/checkout@v4
