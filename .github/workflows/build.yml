@@ -181,7 +181,7 @@ jobs:
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             HOSTCC=gcc \
             HOSTCFLAGS="-fcommon" \
-            KCFLAGS="-fcommon -Wno-error" \
+            KCFLAGS="-fcommon -Wno-error=attribute-alias -Wno-error=unused-const-variable -Wno-error=misleading-indentation -Wno-error=stringop-overflow -Wno-error=restrict -Wno-error=sizeof-pointer-memaccess" \
             -j$(nproc --all) 2>&1 | tail -80
 
           # 检查编译产物
