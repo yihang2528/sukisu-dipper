@@ -153,7 +153,7 @@ jobs:
           # 3. -Wno-error: 作为双保险, 确保所有警告都不致命
           # 4. -Wno-address-of-packed-member: 部分结构体对齐警告
           # 5. -Wno-stringop-overflow: 误报
-          CFLAGS_EXTRA="-fcommon -Wno-error -Wno-attribute-alias -Wno-address-of-packed-member -Wno-stringop-overflow -Wno-restrict -Wno-maybe-uninitialized -Wno-array-bounds"
+          CFLAGS_EXTRA="-fcommon -w"
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
