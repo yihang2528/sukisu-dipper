@@ -115,18 +115,30 @@ jobs:
           # GCC 11 会产生 4.9 时代不存在的警告 (如 -Wattribute-alias),
           # -Werror 把这些警告变成错误导致编译失败.
           #
-          # 修复: 将所有 -Werror 替换为 -Wno-error
-          #   -Werror           → -Wno-error          (全部警告不作为错误)
-          #   -Werror=xxx       → -Wno-error=xxx      (特定警告不作为错误)
+          # 修复策略:
+          #   -Werror            → -Wno-error          (独立 -Werror, 全部警告不作为错误)
+          #   -Werror=xxx        → -Wno-error=xxx      (等号形式)
+          #   -Werror-xxx        → 不动! 这是 GCC 旧式写法 (-Werror-implicit-function-declaration)
+          #                        GCC 不支持 -Wno-error-xxx 形式
           #
-          # 不能用 s/-Werror//g (会删掉 -Werror=xxx 中的 -Werror, 留下 =xxx 导致 GCC 报错)
-          # 不能用 s/-Werror[= ]/-Wno-error=/g (会在 -Werror<空格> 的情况留下 -Wno-error= 但没有参数)
+          # sed 模式: 只匹配 -Werror 后面是 空格/行尾/= 的情况
+          #   -Werror($|[ =])  → 不行, sed 不支持 lookahead
+          #   用两个 sed: 一个处理 -Werror=, 一个处理独立的 -Werror
 
           echo "=== Before patch ==="
           grep -n 'Werror' Makefile scripts/Makefile.build 2>/dev/null || echo "No -Werror found"
 
-          sed -i 's/-Werror/-Wno-error/g' Makefile
-          sed -i 's/-Werror/-Wno-error/g' scripts/Makefile.build
+          # 处理 -Werror=xxx → -Wno-error=xxx
+          sed -i 's/-Werror=/-Wno-error=/g' Makefile
+          sed -i 's/-Werror=/-Wno-error=/g' scripts/Makefile.build
+
+          # 处理独立的 -Werror (后面不是 - 或字母) → -Wno-error
+          # 用 word boundary: -Werror 后面是空格/行尾/引号
+          sed -i 's/-Werror\([^a-zA-Z=-]\)/-Wno-error\1/g' Makefile
+          sed -i 's/-Werror\([^a-zA-Z=-]\)/-Wno-error\1/g' scripts/Makefile.build
+          # 处理行尾的 -Werror
+          sed -i 's/-Werror$/-Wno-error/g' Makefile
+          sed -i 's/-Werror$/-Wno-error/g' scripts/Makefile.build
 
           echo "=== After patch ==="
           grep -n 'Werror\|Wno-error' Makefile scripts/Makefile.build 2>/dev/null || echo "No Werror flags found"
@@ -151,7 +163,10 @@ jobs:
           grep -i "KSU\|KPROBES\|KPM" out/.config || true
 
           # out/Makefile 是 make defconfig 生成的, 里面也可能有 -Werror
-          sed -i 's/-Werror/-Wno-error/g' out/Makefile 2>/dev/null || true
+          # 用同样的安全模式替换 (不碰 -Werror-xxx)
+          sed -i 's/-Werror=/-Wno-error=/g' out/Makefile 2>/dev/null || true
+          sed -i 's/-Werror\([^a-zA-Z=-]\)/-Wno-error\1/g' out/Makefile 2>/dev/null || true
+          sed -i 's/-Werror$/-Wno-error/g' out/Makefile 2>/dev/null || true
 
           make O=out ARCH=arm64 \
             CROSS_COMPILE=aarch64-linux-gnu- \
