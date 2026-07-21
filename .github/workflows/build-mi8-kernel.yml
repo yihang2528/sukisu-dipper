@@ -1,4 +1,4 @@
-name: Build Mi8 Kernel + DTB
+name: Build Mi8 DTB
 
 on:
   workflow_dispatch:
@@ -10,33 +10,29 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev           gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio zstd git
+        sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev \
+          gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio zstd git
 
     - name: Clone sdm845-mainline fork with Mi8 DTS
       run: |
         git clone --depth=1 -b add-xiaomi-ursa https://gitlab.com/krey_glsux2/sdm845-mainline.git kernel-src
-        cd kernel-src
 
     - name: Configure kernel
       run: |
         cd kernel-src
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
 
-    - name: Build DTB only
+    - name: Build Mi8 DTBs only
       run: |
         cd kernel-src
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) dtbs
-
-    - name: Extract Mi8 DTBs
-      run: |
-        mkdir -p artifacts
-        cp kernel-src/arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-dipper.dtb artifacts/
-        cp kernel-src/arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-equuleus.dtb artifacts/
-        cp kernel-src/arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-ursa.dtb artifacts/
-        ls -la artifacts/
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) \
+          dtbs/qcom/sdm845-xiaomi-mi8-dipper.dtb \
+          dtbs/qcom/sdm845-xiaomi-mi8-equuleus.dtb \
+          dtbs/qcom/sdm845-xiaomi-mi8-ursa.dtb
+        ls -la arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-*.dtb
 
     - name: Upload DTB artifacts
       uses: actions/upload-artifact@v4
       with:
         name: mi8-dtbs
-        path: artifacts/
+        path: kernel-src/arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-*.dtb
