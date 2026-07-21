@@ -18,8 +18,10 @@ jobs:
     - name: Build Mi8 DTBs
       run: |
         cd kernel-src
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu= -j$(nproc) qcom/sdm845-xiaomi-mi8-dipper.dtb qcom/sdm845-xiaomi-mi8-equuleus.dtb qcom/sdm845-xiaomi-mi8-ursa.dtb 2>&1 || true
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export ARCH=arm64
+        make defconfig
+        make -j$(nproc) qcom/sdm845-xiaomi-mi8-dipper.dtb qcom/sdm845-xiaomi-mi8-equuleus.dtb qcom/sdm845-xiaomi-mi8-ursa.dtb 2>&1 || true
         ls -la arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-*.dtb 2>/dev/null
 
     - name: Upload DTB artifacts
