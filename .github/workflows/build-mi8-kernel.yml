@@ -7,21 +7,24 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - name: Install dtc
-      run: sudo apt install -y device-tree-compiler
+    - name: Install dependencies
+      run: |
+        sudo apt install -y device-tree-compiler gcc-aarch64-linux-gnu
 
     - name: Clone sdm845-mainline fork with Mi8 DTS
       run: |
         git clone --depth=1 -b add-xiaomi-ursa https://gitlab.com/krey_glsux2/sdm845-mainline.git kernel-src
 
-    - name: Build Mi8 DTBs with dtc
+    - name: Build Mi8 DTBs
       run: |
-        cd kernel-src/arch/arm64/boot/dts/qcom
-        # dtc编译dts为dtb，需要指定include路径
-        dtc -I dts -O dtb -o sdm845-xiaomi-mi8-dipper.dtb -i . sdm845-xiaomi-mi8-dipper.dts 2>&1 || true
-        dtc -I dts -O dtb -o sdm845-xiaomi-mi8-equuleus.dtb -i . sdm845-xiaomi-mi8-equuleus.dts 2>&1 || true
-        dtc -I dts -O dtb -o sdm845-xiaomi-mi8-ursa.dtb -i . sdm845-xiaomi-mi8-ursa.dts 2>&1 || true
-        ls -la sdm845-xiaomi-mi8-*.dtb 2>/dev/null
+        cd kernel-src
+        # Use kernel build system with proper cross compiler
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) \
+          arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-dipper.dtb \
+          arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-equuleus.dtb \
+          arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-ursa.dtb 2>&1 || true
+        ls -la arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-*.dtb 2>/dev/null
 
     - name: Upload DTB artifacts
       uses: actions/upload-artifact@v4
