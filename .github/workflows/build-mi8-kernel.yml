@@ -11,27 +11,20 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y build-essential bc bison flex libssl-dev libncurses5-dev \
-          gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio zstd git device-tree-compiler
+          gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio zstd git
 
     - name: Clone sdm845-mainline fork with Mi8 DTS
       run: |
         git clone --depth=1 -b add-xiaomi-ursa https://gitlab.com/krey_glsux2/sdm845-mainline.git kernel-src
 
-    - name: Check DTS files exist
-      run: |
-        ls -la kernel-src/arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-*.dts
-        ls -la kernel-src/arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-common.dtsi
-        grep -i 'xiaomi-mi8' kernel-src/arch/arm64/boot/dts/qcom/Makefile || echo "Mi8 not in Makefile"
-
-    - name: Add Mi8 to Makefile and build
+    - name: Build Mi8 DTBs
       run: |
         cd kernel-src
-        # Add Mi8 dtbs to Makefile
-        echo "dtb-y += sdm845-xiaomi-mi8-dipper.dtb" >> arch/arm64/boot/dts/qcom/Makefile
-        echo "dtb-y += sdm845-xiaomi-mi8-equuleus.dtb" >> arch/arm64/boot/dts/qcom/Makefile
-        echo "dtb-y += sdm845-xiaomi-mi8-ursa.dtb" >> arch/arm64/boot/dts/qcom/Makefile
         make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- defconfig
-        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu= -j$(nproc) arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-dipper.dtb arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-equuleus.dtb arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-ursa.dtb 2>&1 || true
+        make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu= -j$(nproc) \
+          arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-dipper.dtb \
+          arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-equuleus.dtb \
+          arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-ursa.dtb 2>&1 || true
         ls -la arch/arm64/boot/dts/qcom/sdm845-xiaomi-mi8-*.dtb 2>/dev/null
 
     - name: Upload DTB artifacts
